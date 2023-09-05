@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    branches: master
+  workflow_dispatch:
+
+jobs:
+  release-setup:
+    runs-on: ubuntu-latest
+    outputs:
+      version_id: ${{ steps.calver.outputs.version_id }}
+    steps:
+    - uses: actions/checkout@v2
+    - name: Generate release tag
+      id: calver
+      run: |
+        CURRENT_DATE=$(date +"%Y-%m-%d")
+        DEPLOYED_COMMIT=$(git log --format='%h' -n1)
+        NEW_CALVER="release.$CURRENT_DATE.$DEPLOYED_COMMIT"
+        echo "::set-output name=version_id::$NEW_CALVER"
+
+  build-and-publish-x86:
+    needs: release-setup
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: '^1.21.0'
+    - name: Setup AWS Creds
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.PROD_BOT_USER_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.PROD_BOT_USER_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+    - name: Run tests
+      run: |
+        go test -v ./...
+    - name: Build
+      run: |
+        GOOS=linux GOARCH=amd64 go build -o lambda-otel-exporter
+        tar cvf lambda-otel-exporter-x86_64.tgz lambda-otel-exporter
+    - name: Publish
+      run: |
+        aws s3 cp lambda-otel-exporter-x86_64.tgz s3://vendia-build-artifacts/lambda-otel-exporter/${{ needs.release-setup.outputs.version_id }}/lambda-otel-exporter-x86_64.tgz
+
+  build-and-publish-arm64:
+    needs: release-setup
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: '^1.21.0'
+    - name: Setup AWS Creds
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.PROD_BOT_USER_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.PROD_BOT_USER_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+    - name: Run tests
+      run: |
+        go test -v ./...
+    - name: Build
+      run: |
+        GOOS=linux GOARCH=arm64 go build -o lambda-otel-exporter
+        tar cvf lambda-otel-exporter-arm64.tgz lambda-otel-exporter
+    - name: Publish
+      run: |
+        aws s3 cp lambda-otel-exporter-arm64.tgz s3://vendia-build-artifacts/lambda-otel-exporter/${{ needs.release-setup.outputs.version_id }}/lambda-otel-exporter-arm64.tgz
